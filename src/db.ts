@@ -59,7 +59,15 @@ export async function insertGroup(
   db: D1Database,
   userId: string,
   g: GroupPayload,
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
+  // 检查同名分组（不区分大小写）
+  const existing = await db
+    .prepare('SELECT id FROM fav_groups WHERE user_id = ? AND LOWER(name) = LOWER(?)')
+    .bind(userId, g.name)
+    .first<{ id: string }>();
+  if (existing) {
+    return { ok: false, error: `分组「${g.name}」已存在` };
+  }
   const now = NOW();
   await db.prepare(`
     INSERT INTO fav_groups (user_id, id, name, description, sort_order, created_at, updated_at)
@@ -71,6 +79,7 @@ export async function insertGroup(
     userId, g.id, g.name, g.description ?? '',
     g.sort_order, g.created_at ?? now, g.updated_at ?? now,
   ).run();
+  return { ok: true };
 }
 
 export async function updateGroup(
@@ -79,13 +88,21 @@ export async function updateGroup(
   groupId: string,
   name?: string,
   description?: string,
-): Promise<boolean> {
-  // 先确认分组存在
+): Promise<{ ok: boolean; error?: string }> {
   const existing = await db
     .prepare('SELECT id FROM fav_groups WHERE user_id = ? AND id = ?')
     .bind(userId, groupId)
     .first<{ id: string }>();
-  if (!existing) return false;
+  if (!existing) return { ok: false, error: 'Group not found' };
+
+  // 若改了名称，检查是否与其他分组重名（排除自身）
+  if (name !== undefined) {
+    const duplicate = await db
+      .prepare('SELECT id FROM fav_groups WHERE user_id = ? AND LOWER(name) = LOWER(?) AND id != ?')
+      .bind(userId, name, groupId)
+      .first<{ id: string }>();
+    if (duplicate) return { ok: false, error: `分组「${name}」已存在` };
+  }
 
   const parts: string[] = ['updated_at = ?'];
   const binds: unknown[] = [NOW()];
@@ -97,7 +114,7 @@ export async function updateGroup(
     .prepare(`UPDATE fav_groups SET ${parts.join(', ')} WHERE user_id = ? AND id = ?`)
     .bind(...binds)
     .run();
-  return true;
+  return { ok: true };
 }
 
 /**

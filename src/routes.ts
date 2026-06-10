@@ -162,7 +162,8 @@ export async function handleAddGroup(request: Request, env: Env): Promise<Respon
   if (!g?.id || !g.name) return badRequest('group.id and group.name are required');
 
   try {
-    await insertGroup(env.DB, userId, g);
+    const result = await insertGroup(env.DB, userId, g);
+    if (!result.ok) return badRequest(result.error ?? '新增分组失败');
     const vector = await bumpVersion(env.DB, userId, deviceId);
     await writeLog(env.DB, userId, deviceId, LOG_ACTIONS.ADD_GROUP, { name: g.name });
     await broadcast(env, userId, deviceId, 'add_group', vector);
@@ -191,8 +192,8 @@ export async function handleUpdateGroup(
     return badRequest('name or description is required');
 
   try {
-    const ok = await updateGroup(env.DB, userId, groupId, body.name, body.description);
-    if (!ok) return notFound('Group not found');
+    const result = await updateGroup(env.DB, userId, groupId, body.name, body.description);
+    if (!result.ok) return result.error?.includes('已存在') ? badRequest(result.error) : notFound('Group not found');
     const vector = await bumpVersion(env.DB, userId, deviceId);
     await writeLog(env.DB, userId, deviceId, LOG_ACTIONS.RENAME_GROUP, {
       group_id: groupId, name: body.name, description: body.description,
