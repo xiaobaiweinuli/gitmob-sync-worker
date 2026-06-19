@@ -122,17 +122,28 @@ export default {
 // ─── WebSocket 升级处理 ──────────────────────────────────────────────────────
 
 async function handleWsUpgrade(request: Request, env: Env): Promise<Response> {
-  // 验证 token，拿到 user_id
-  const userId = await authenticate(request);
+  const url = new URL(request.url);
+
+  // 浏览器端 WebSocket 不支持自定义 header，token 通过 URL 参数传入
+  let userId: string | null = null;
+  const headerAuth = request.headers.get('Authorization');
+  if (headerAuth) {
+    userId = await authenticate(request);
+  } else {
+    const urlToken = url.searchParams.get('token');
+    if (urlToken) {
+      const fakeReq = new Request('https://fake/', {
+        headers: { Authorization: `Bearer ${urlToken}` },
+      });
+      userId = await authenticate(fakeReq);
+    }
+  }
   if (!userId) return unauthorized();
 
-  const deviceId = getDeviceId(request);
+  const deviceId = url.searchParams.get('device_id') ?? getDeviceId(request);
+  const doId     = env.FAV_SYNC_DO.idFromName(userId);
+  const stub     = env.FAV_SYNC_DO.get(doId);
 
-  // 获取该用户对应的 DO 实例（每个 user_id 唯一）
-  const doId  = env.FAV_SYNC_DO.idFromName(userId);
-  const stub  = env.FAV_SYNC_DO.get(doId);
-
-  // 将请求转发给 DO，同时附上已验证的 userId 和 deviceId
   const doUrl = new URL(request.url);
   doUrl.searchParams.set('user_id',   userId);
   doUrl.searchParams.set('device_id', deviceId);

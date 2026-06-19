@@ -26,14 +26,18 @@ async function broadcast(
   newVector: Record<string, number>,
 ): Promise<void> {
   try {
-    const doId   = env.FAV_SYNC_DO.idFromName(userId);
-    const stub   = env.FAV_SYNC_DO.get(doId);
-    // 发送一条内部 HTTP 请求让 DO 广播（DO 的 fetch 只接受 WS 升级，
-    // 广播通过专用 /broadcast 路径处理）
+    const doId = env.FAV_SYNC_DO.idFromName(userId);
+    const stub = env.FAV_SYNC_DO.get(doId);
+    // 必须包含 type: 'fav_updated'，SW 的 ws.onmessage 按此字段路由
     await stub.fetch('http://internal/broadcast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id: deviceId, change_type: changeType, new_version_vector: newVector }),
+      body: JSON.stringify({
+        type:               'fav_updated',   // ← 关键：SW onmessage 匹配此字段
+        device_id:          deviceId,
+        change_type:        changeType,
+        new_version_vector: newVector,
+      }),
     });
   } catch { /* 广播失败不影响主流程 */ }
 }
