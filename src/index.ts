@@ -34,6 +34,7 @@ import {
   handleDeleteRepo,
   handleReorderRepos,
   handleGetLogs,
+  handleWsAuth,
 } from './routes.js';
 
 // 重新导出 DO class（wrangler 要求从 main 导出）
@@ -72,6 +73,10 @@ export default {
     }
 
     // ── WebSocket 升级 ─────────────────────────────────────────────────────
+    if (path === '/ws-auth' && method === 'POST') {
+      return handleWsAuth(request, env);
+    }
+
     if (method === 'GET' && path === '/ws') {
       return handleWsUpgrade(request, env);
     }
@@ -122,27 +127,27 @@ export default {
 // ─── WebSocket 升级处理 ──────────────────────────────────────────────────────
 
 async function handleWsUpgrade(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-
-  // 浏览器端 WebSocket 不支持自定义 header，token 通过 URL 参数传入
-  let userId: string | null = null;
-  const headerAuth = request.headers.get('Authorization');
-  if (headerAuth) {
-    userId = await authenticate(request);
-  } else {
-    const urlToken = url.searchParams.get('token');
-    if (urlToken) {
-      const fakeReq = new Request('https://fake/', {
-        headers: { Authorization: `Bearer ${urlToken}` },
-      });
-      userId = await authenticate(fakeReq);
-    }
-  }
-  if (!userId) return unauthorized();
-
+  const url     = new URL(request.url);
+  const wsToken = url.searchParams.get('ws_token');
   const deviceId = url.searchParams.get('device_id') ?? getDeviceId(request);
-  const doId     = env.FAV_SYNC_DO.idFromName(userId);
-  const stub     = env.FAV_SYNC_DO.get(doId);
+
+  if (!wsToken) return unauthorized();
+
+  // 查 D1 验证 ws_token，拿到 userId（一次性 token，验证后立即删除）
+  const row = await env.DB.prepare(
+    'SELECT user_id FROM ws_tokens WHERE token = ? AND expires_at > ?',
+  ).bind(wsToken, Date.now()).first<{ user_id: string }>();
+
+  if (!row) return unauthorized(); // token 不存在或已过期
+
+  // 一次性消费：立即删除，防止重放
+  await env.DB.prepare('DELETE FROM ws_tokens WHERE token = ?').bind(wsToken).run();
+
+  const userId = row.user_id;
+
+  // 路由到该用户专属的 DO 实例
+  const doId = env.FAV_SYNC_DO.idFromName(userId);
+  const stub = env.FAV_SYNC_DO.get(doId);
 
   const doUrl = new URL(request.url);
   doUrl.searchParams.set('user_id',   userId);

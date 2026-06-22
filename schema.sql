@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   created_at INTEGER NOT NULL
 );
 
+-- ── WS 短生命周期 token（一次性使用，有效期 5 分钟）─────────────────────────
+-- 避免 GitHub PAT 出现在 WS URL 中（URL 可能被日志记录）
+CREATE TABLE IF NOT EXISTS ws_tokens (
+  token      TEXT    PRIMARY KEY,          -- UUID，一次性
+  user_id    TEXT    NOT NULL,             -- GitHub login
+  device_id  TEXT    NOT NULL,
+  expires_at INTEGER NOT NULL             -- Unix 毫秒时间戳
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_tokens_expires
+  ON ws_tokens(expires_at);
+
 -- ── 限流计数表 ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rate_limit (
   key   TEXT    PRIMARY KEY,

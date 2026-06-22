@@ -338,7 +338,27 @@ export async function handleReorderRepos(request: Request, env: Env): Promise<Re
   }
 }
 
-// ─── GET /logs（拉取同步日志）───────────────────────────────────────────────
+// ─── POST /ws-auth（获取 WS 短生命周期 token，避免 PAT 出现在 WS URL）────────
+
+export async function handleWsAuth(request: Request, env: Env): Promise<Response> {
+  const auth = await authAndLimit(request, env, false);
+  if (auth instanceof Response) return auth;
+  const { userId, deviceId } = auth;
+
+  // 清理过期 token
+  await env.DB.prepare('DELETE FROM ws_tokens WHERE expires_at < ?')
+    .bind(Date.now()).run();
+
+  // 生成一次性 WS token，有效期 5 分钟
+  const wsToken  = crypto.randomUUID();
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+
+  await env.DB.prepare(
+    'INSERT INTO ws_tokens (token, user_id, device_id, expires_at) VALUES (?, ?, ?, ?)',
+  ).bind(wsToken, userId, deviceId, expiresAt).run();
+
+  return jsonOk({ ok: true, ws_token: wsToken, user_id: userId });
+}
 
 export async function handleGetLogs(request: Request, env: Env): Promise<Response> {
   const auth = await authAndLimit(request, env, false);
